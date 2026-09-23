@@ -269,7 +269,7 @@ export class UI {
 
     this.refreshButtons();
 
-    // "Hold to drop" hint until the first press, and again after idling.
+    // "Hold to shoot" hint until the first press, and again after idling.
     const d = G.dropper;
     const idle = !d.holding && (!d.everHeld || G.realTime - d.lastInput > CONFIG.hintIdle);
     if (idle !== this.hintShown) {

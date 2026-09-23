@@ -413,11 +413,13 @@ export class Balls {
     pipe.queue.shift();
     const dropper = G.dropper;
     const p = b.group.position;
-    p.x = dropper.x;
-    p.y = CONFIG.pipe.topY - CONFIG.pipe.radius * 0.3;
+    // Fired out of the muzzle along the barrel.
+    p.x = dropper.tipX();
+    p.y = dropper.tipY();
     b.state = BS.PHYS;
-    b.vx = dropper.v * PH.inheritDropper;
-    b.vy = -PH.releaseSpeed;
+    b.vx = dropper.dirX() * CONFIG.launchSpeed;
+    b.vy = dropper.dirY() * CONFIG.launchSpeed;
+    b.popT = 0.14; // tiny pop as it leaves the barrel
     b.belowCeiling = false;
     b.onFloor = false;
     b.hitCd = 0;

@@ -41,7 +41,7 @@ export const CONFIG = {
     inletX: -3.38, // x of the inlet mouth (bottom-left); mouth faces +X, the floor ends here
     leftX: -4.2, // x of the vertical left run (its inner edge is the left wall)
     topY: 5.85, // y of the horizontal top run (dropper rides on it)
-    rightX: 4.3, // x where the top run ends (closed cap)
+    rightX: 0.62, // x where the top run ends — the fixed launcher sits here (above the picture centre)
     inletBend: 0.62, // radius of the bend from the inlet into the left run
     cornerRadius: 0.95, // radius of the top-left corner
   },
@@ -49,19 +49,19 @@ export const CONFIG = {
   ballSpacing: 0.03, // extra gap kept between neighbouring balls in the pipe (0 = touching)
   pipeCapacity: 16, // max balls in play (falling/returning ones count too)
 
-  // ─── Dropper (manual: hold to drop, drag to aim) ─────────────────────────
-  dropInterval: 0.28, // s between two releases while holding
-  dropperStiffness: 520, // spring constant pulling the dropper towards the finger
-  dropperDamping: 46, // spring damping (≈ 2·√stiffness = critically damped)
-  releaseCatchUp: 0.35, // world units — head ball may lag the ring by this much and still drop
-  hintIdle: 6, // s without input before the "hold to drop" hint shows again
+  // ─── Launcher (fixed; manual: hold to shoot, drag to tilt the aim) ───────
+  dropInterval: 0.28, // s between two shots while holding
+  launchSpeed: 9, // world units / s a ball leaves the barrel with
+  maxAimAngle: 1.36, // rad — barrel tilts at most this far from straight down (~78°)
+  aimSmoothing: 26, // how fast the barrel turns towards the finger (1/s)
+  barrelLength: 0.62, // barrel length below the ring
+  releaseCatchUp: 0.05, // world units — head ball must be this close to the launcher to shoot
+  hintIdle: 6, // s without input before the "hold to shoot" hint shows again
 
   // ─── Ball physics (2D, no engine) ───────────────────────────────────────
   physics: {
     gravity: 24, // world units / s²
     maxSpeed: 14, // speed cap (keeps substeps tunnel-free)
-    releaseSpeed: 1.2, // initial downward speed when dropped
-    inheritDropper: 0.25, // fraction of the dropper's sideways speed given to the ball
     cubeRestitution: 0.6, // bounciness off cubes
     cubeRound: 0.22, // cube corner rounding (fraction of a cell) — seams deflect balls
     breakRestitution: 0.4, // bounciness when the hit breaks the cube
@@ -127,8 +127,10 @@ export const CONFIG = {
   buildDropHeight: 2.6, // world units cubes drop from during build-in
 
   // ─── Aim line ───────────────────────────────────────────────────────────
-  aimDotSpacing: 0.3, // world units between dots of the aim line
-  aimDotSpeed: 2.2, // world units / s the aim-line dots scroll downwards
+  aimDotSpacing: 0.3, // world units between dots of the aim arc
+  aimDotSpeed: 1.4, // world units / s the aim-arc dots flow along the path
+  aimDotSize: 0.075, // radius of an aim dot
+  aimMaxTime: 1.8, // s of flight the aim arc predicts (stops at the first hit)
 
   // ─── Economy ────────────────────────────────────────────────────────────
   startMoney: 0, // money on a fresh save

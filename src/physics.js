@@ -10,6 +10,11 @@ const L = CONFIG.layout;
 export const WALL_LEFT = P.leftX + P.radius; // inner edge of the vertical pipe
 export const WALL_RIGHT = L.boardWidth / 2;
 export const CEILING = P.topY - P.radius; // underside of the top pipe
+const BOARD_TOP = L.boardHeight / 2;
+// Right of the launcher there's no pipe overhead, just the board frame.
+function ceilingY(x) {
+  return x < P.rightX + P.radius ? CEILING : BOARD_TOP;
+}
 export const MOUTH_X = P.inletX; // floor ends at the inlet mouth
 const INLET_TOP = L.floorY + P.radius * 2; // top of the inlet mouth
 
@@ -141,10 +146,11 @@ export function stepBall(b, grid, dt, onCube, onBounce) {
     p.x = WALL_LEFT + r;
     bounce(b, 1, 0, PH.wallRestitution, 0);
   }
-  // Ceiling under the top pipe (only once the ball has left the dropper).
-  if (p.y < CEILING - r - 0.05) b.belowCeiling = true;
-  if (b.belowCeiling && p.y + r > CEILING) {
-    p.y = CEILING - r;
+  // Ceiling (only once the ball has left the launcher).
+  const ceil = ceilingY(p.x);
+  if (p.y < ceil - r - 0.05) b.belowCeiling = true;
+  if (b.belowCeiling && p.y + r > ceil) {
+    p.y = ceil - r;
     bounce(b, 0, -1, PH.wallRestitution, 0);
   }
 
@@ -165,6 +171,30 @@ export function stepBall(b, grid, dt, onCube, onBounce) {
     }
   }
   return null;
+}
+
+// Does a circle at (x, y) touch any alive cube? (used by the aim prediction)
+export function circleHitsGrid(grid, x, y, r) {
+  if (grid.building || grid.aliveCount === 0) return false;
+  const cell = grid.cell;
+  const kr = cell * PH.cubeRound;
+  const rr = r + kr;
+  const inner = cell - 2 * kr;
+  const c0 = Math.max(0, Math.floor((x - r - grid.x0) / cell));
+  const c1 = Math.min(grid.cols - 1, Math.floor((x + r - grid.x0) / cell));
+  const k0 = Math.max(0, Math.floor((y - r - grid.y0) / cell));
+  const k1 = Math.min(grid.rows - 1, Math.floor((y + r - grid.y0) / cell));
+  for (let c = c0; c <= c1; c++) {
+    for (let k = k0; k <= k1; k++) {
+      if (!grid.alive[(grid.rows - 1 - k) * grid.cols + c]) continue;
+      const bx = grid.x0 + c * cell + kr;
+      const by = grid.y0 + k * cell + kr;
+      const dx = x - (x < bx ? bx : x > bx + inner ? bx + inner : x);
+      const dy = y - (y < by ? by : y > by + inner ? by + inner : y);
+      if (dx * dx + dy * dy < rr * rr) return true;
+    }
+  }
+  return false;
 }
 
 // Ball-vs-ball collisions (mass ∝ r²).

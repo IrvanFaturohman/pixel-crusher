@@ -12,7 +12,7 @@ npm run deploy   # build + publish to GitHub Pages (gh-pages branch)
 ```
 
 ## How to play
-- **Hold** anywhere on the board to drop balls, **drag** to aim, release to stop. You start with one ball.
+- **Hold** anywhere on the board to shoot balls from the fixed launcher, **drag** to tilt the aim (the dotted arc shows the path), release to stop. You start with one ball.
 - Balls bounce off the floating pixel picture (every bounce deals damage), fall past it, roll down the sloped floor into the inlet and ride the pipe back up to the dropper.
 - Buttons: **Add Ball**, **Merge** (two lowest equal balls → one of double value), **Income ×**.
 - **D** key (or a three-finger tap) toggles the debug panel: money cheats, game speed ×1/×3/×10, skip picture, add ball of any value, FPS/ball/particle stats, reset save.
