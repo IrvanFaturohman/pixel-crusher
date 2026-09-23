@@ -9,7 +9,7 @@ export const G = {
   speed: 1, // debug game speed multiplier
 };
 
-const SAVE_KEY = 'pixel-crusher-save-v1';
+const SAVE_KEY = 'pixel-crusher-save-v2'; // v2: physics gameplay (old saves don't carry over)
 
 // Everything that persists between sessions.
 export const state = {
