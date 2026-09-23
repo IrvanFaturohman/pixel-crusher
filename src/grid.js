@@ -44,7 +44,6 @@ export class Grid {
     this.activeCount = 0;
 
     this.top = new Int16Array(32); // heightmap: row of topmost alive cube per column (-1 = empty)
-    this.incoming = new Float32Array(32); // damage of balls already falling towards each column
     this.rowTicked = new Uint8Array(32);
     this.cols = 1;
     this.rows = 1;
@@ -69,11 +68,10 @@ export class Grid {
     this.pictureIndex = index;
     this.cols = pic.cols;
     this.rows = pic.rows;
-    const areaW = L.picRight - L.picLeft;
-    const areaH = L.picTop - L.floorY;
-    this.cell = Math.min(areaW / pic.cols, areaH / pic.rows, L.maxCell);
-    this.x0 = L.picLeft + (areaW - pic.cols * this.cell) / 2;
-    this.y0 = L.floorY;
+    // The picture floats in the middle with open lanes around it.
+    this.cell = Math.min(L.picMaxW / pic.cols, L.picMaxH / pic.rows, L.maxCell);
+    this.x0 = L.picCenterX - (pic.cols * this.cell) / 2;
+    this.y0 = L.picCenterY - (pic.rows * this.cell) / 2; // bottom edge
     this.maxHp = CONFIG.cubeBaseHP * Math.pow(CONFIG.cubeHPGrowth, index);
 
     const n = pic.cols * pic.rows;
@@ -112,7 +110,6 @@ export class Grid {
     if (useSave && this.aliveCount === 0) return this.load(index + 1);
 
     this.mesh.count = n;
-    this.incoming.fill(0);
     for (let c = 0; c < this.cols; c++) this.recomputeTop(c);
     for (let i = 0; i < n; i++) {
       if (this.alive[i]) this.writeMatrix(i, 0, 0, 0, 1);
@@ -151,17 +148,15 @@ export class Grid {
   rowY(r) {
     return this.y0 + (this.rows - 1 - r + 0.5) * this.cell;
   }
+  // Column under x, or -1 outside the picture.
   colAt(x) {
     const c = Math.floor((x - this.x0) / this.cell);
-    return c < 0 ? 0 : c >= this.cols ? this.cols - 1 : c;
+    return c < 0 || c >= this.cols ? -1 : c;
   }
-  // Y of the top face of the column's topmost cube (floor if empty).
+  // Y of the top face of the column's topmost cube, or null if nothing's there.
   columnTopY(c) {
-    if (this.building || c < 0 || c >= this.cols || this.top[c] < 0) return L.floorY;
+    if (this.building || c < 0 || c >= this.cols || this.top[c] < 0) return null;
     return this.y0 + (this.rows - this.top[c]) * this.cell;
-  }
-  isColumnEmpty(c) {
-    return this.building || this.top[c] < 0;
   }
   get progress() {
     return this.totalCount ? 1 - this.aliveCount / this.totalCount : 0;
@@ -177,35 +172,6 @@ export class Grid {
     }
   }
 
-  // Auto-aim: highest column; ties → lowest remaining HP of its top cube
-  // (counting balls already falling there); then random.
-  autoAimColumn() {
-    let best = -1;
-    let bestRow = 1e9;
-    let bestHp = 1e30;
-    let ties = 0;
-    for (let c = 0; c < this.cols; c++) {
-      let r = this.top[c];
-      if (r < 0) continue;
-      let hp = this.hp[r * this.cols + c] - this.incoming[c];
-      if (hp <= 0) {
-        // Top cube is already doomed: rank the column by the cube below it.
-        r += 1;
-        hp = this.maxHp;
-      }
-      if (r < bestRow || (r === bestRow && hp < bestHp - 1e-6)) {
-        best = c;
-        bestRow = r;
-        bestHp = hp;
-        ties = 1;
-      } else if (r === bestRow && Math.abs(hp - bestHp) <= 1e-6) {
-        ties++;
-        if (Math.random() * ties < 1) best = c; // reservoir pick among ties
-      }
-    }
-    return best;
-  }
-
   // ── Damage ───────────────────────────────────────────────────────────
   splashRule(value) {
     const t = CONFIG.splashTable;
@@ -214,43 +180,36 @@ export class Grid {
     return rule;
   }
 
-  // Hit column `col` with `damage`. Returns damage actually applied (no
-  // overkill carry-over). this.lastBreaks = cubes broken by this hit.
-  hit(col, damage, value) {
+  // A ball hit cube (c, r) on the face with outward normal (nx, ny).
+  // Splash spreads ACROSS the hit face; "below" hits the cube behind it.
+  // Returns damage actually applied (no overkill carry-over).
+  hitCell(c, r, damage, value, nx, ny, px, py) {
     this.lastBreaks = 0;
-    if (this.building || col < 0 || col >= this.cols) return 0;
-    const topRow = this.top[col];
-    if (topRow < 0) return 0;
+    if (this.building) return 0;
     const rule = this.splashRule(value);
-
-    // Resolve every target from the heightmap BEFORE applying damage.
-    let belowRow = -1;
+    const vertical = Math.abs(ny) >= Math.abs(nx); // top/bottom face → spread sideways
+    let applied = this.damageCube(c, r, damage, CONFIG.punchMain, true, px, py, nx, ny);
     if (rule.below > 0) {
-      for (let r = topRow + 1; r < this.rows; r++) {
-        if (this.alive[r * this.cols + col]) {
-          belowRow = r;
-          break;
-        }
-      }
+      const bc = vertical ? c : c - Math.sign(nx);
+      const br = vertical ? r + (ny > 0 ? 1 : -1) : r; // rows count downwards
+      applied += this.damageAt(bc, br, damage * rule.below);
     }
-
-    let applied = this.damageCube(col, topRow, damage, CONFIG.punchMain, true);
-    if (belowRow >= 0) applied += this.damageCube(col, belowRow, damage * rule.below, CONFIG.punchSplash, false);
     for (let d = 1; d <= rule.width; d++) {
       const frac = rule.falloff ? rule.splash * (1 - (d - 1) / rule.width) : rule.splash;
       for (let s = -1; s <= 1; s += 2) {
-        const c = col + s * d;
-        if (c < 0 || c >= this.cols) continue;
-        const r = this.top[c];
-        if (r < 0) continue;
-        applied += this.damageCube(c, r, damage * frac, CONFIG.punchSplash, false);
+        applied += vertical ? this.damageAt(c + s * d, r, damage * frac) : this.damageAt(c, r + s * d, damage * frac);
       }
     }
     if (this.aliveCount === 0) G.game.onPictureComplete();
     return applied;
   }
 
-  damageCube(c, r, dmg, punch, isMain) {
+  damageAt(c, r, dmg) {
+    if (c < 0 || r < 0 || c >= this.cols || r >= this.rows) return 0;
+    return this.damageCube(c, r, dmg, CONFIG.punchSplash, false, this.colX(c), this.rowY(r) + this.cell * 0.5, 0, 1);
+  }
+
+  damageCube(c, r, dmg, punch, isMain, px, py, nx, ny) {
     const i = r * this.cols + c;
     if (!this.alive[i] || dmg <= 0) return 0;
     const applied = Math.min(dmg, this.hp[i]);
@@ -268,7 +227,7 @@ export class Grid {
     this.punchAmp[i] = punch;
     if (!this.loose[i] && this.hp[i] / this.maxHp < CONFIG.jitterBelow) this.loosen(i);
     this.activate(i);
-    G.fx.cubeHit(x, y + this.cell * 0.5, z, this.base[i * 3], this.base[i * 3 + 1], this.base[i * 3 + 2], this.cell, isMain);
+    G.fx.cubeHit(px, py, z, this.base[i * 3], this.base[i * 3 + 1], this.base[i * 3 + 2], this.cell, isMain, nx, ny);
     return applied;
   }
 

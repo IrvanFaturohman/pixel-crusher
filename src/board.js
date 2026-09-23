@@ -1,8 +1,8 @@
 // Board panel, frame, floor ledge, background pattern and the pipe meshes.
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { CONFIG } from './config.js';
 import { PipeCurve, pathLength, inletPos, pipeZ } from './pipe.js';
+import { rampY, MOUTH_X } from './physics.js';
 
 const L = CONFIG.layout;
 const P = CONFIG.pipe;
@@ -91,11 +91,30 @@ export function createBoard(scene) {
   frame.receiveShadow = true;
   group.add(frame);
 
-  // ── Floor ledge the pictures stand on ──
-  const ledgeH = L.floorY + H / 2;
+  // ── Sloped floor: lowest at the inlet mouth, so balls roll into it ──
+  const rad = L.boardRadius;
+  const rampShape = new THREE.Shape();
+  rampShape.moveTo(-W / 2, L.floorY);
+  rampShape.lineTo(-W / 2, -H / 2 + rad);
+  rampShape.absarc(-W / 2 + rad, -H / 2 + rad, rad, Math.PI, Math.PI * 1.5, false);
+  rampShape.lineTo(W / 2 - rad, -H / 2);
+  rampShape.absarc(W / 2 - rad, -H / 2 + rad, rad, Math.PI * 1.5, Math.PI * 2, false);
+  rampShape.lineTo(W / 2, rampY(W / 2));
+  rampShape.lineTo(MOUTH_X, L.floorY);
+  rampShape.closePath();
   const ledgeMat = new THREE.MeshStandardMaterial({ color: 0x6fb6e6, roughness: 0.6, envMapIntensity: 0.35 });
-  const ledge = new THREE.Mesh(new RoundedBoxGeometry(W - 0.02, ledgeH + 0.3, L.ledgeDepth, 3, 0.12), ledgeMat);
-  ledge.position.set(0, L.floorY - (ledgeH + 0.3) / 2, L.ledgeDepth / 2);
+  const ledge = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(rampShape, {
+      depth: L.rampDepth - 0.08,
+      bevelEnabled: true,
+      bevelThickness: 0.04,
+      bevelSize: 0.04,
+      bevelSegments: 2,
+      curveSegments: 10,
+    }),
+    ledgeMat,
+  );
+  ledge.position.z = 0.04;
   ledge.receiveShadow = true;
   group.add(ledge);
 

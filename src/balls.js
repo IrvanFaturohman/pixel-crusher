@@ -1,12 +1,15 @@
-// Ball entities: state machine (pipe → dropper → fall → hit → return → pipe),
-// merge sequence, and visuals (glossy sphere + cached number sprite).
+// Ball entities: state machine (pipe → dropper → physics: bounce off cubes,
+// fall past the picture, roll down the floor → inlet → pipe), merge sequence,
+// and visuals (glossy sphere + cached number sprite).
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { G } from './state.js';
 import * as pipe from './pipe.js';
+import { stepBall, collideBalls } from './physics.js';
 import { easeOutElastic, easeInCubic, easeOutBack, popScale } from './fx.js';
 
-export const BS = { PIPE: 0, FALL: 1, IMPACT: 2, RETURN: 3, ROLL_AIR: 4, ROLL: 5, SPAWN: 6, ZIP: 7 };
+export const BS = { PIPE: 0, PHYS: 1, INLET: 2, SPAWN: 6, ZIP: 7 };
+const PH = CONFIG.physics;
 
 const L = CONFIG.layout;
 const LIGHT_TIME = 0.14; // merge: both balls light up
@@ -16,10 +19,9 @@ const SPAWN_HOLD = 0.42; // add ball: time popped out of the inlet
 const SPAWN_SLIDE = 0.13; // add ball: slide back into the inlet
 const ENTER_TIME = 0.18; // squish recovery after entering the pipe
 const BUMP_TIME = 0.13; // queue bump squash
-const RECOVER_TIME = 0.42; // elastic recovery after the impact squash
+const INLET_TIME = 0.1; // slide into the inlet mouth
 const RAINBOW_LEVEL = Math.round(Math.log2(CONFIG.rainbowFrom));
 
-const _v = new THREE.Vector3();
 const _t = new THREE.Vector3();
 
 export function levelOf(v) {
@@ -39,28 +41,6 @@ function shortNum(v) {
   return (v < 10 ? v.toFixed(1).replace(/\.0$/, '') : Math.floor(v)) + units[i];
 }
 
-function makeTagTexture() {
-  const c = document.createElement('canvas');
-  c.width = 128;
-  c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = '#ffcf2e';
-  g.strokeStyle = '#9a4f07';
-  g.lineWidth = 6;
-  g.beginPath();
-  g.roundRect(5, 5, 118, 54, 27);
-  g.fill();
-  g.stroke();
-  g.fillStyle = '#6a3300';
-  g.font = '700 38px Fredoka, sans-serif';
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('×' + CONFIG.aimBonus, 64, 35);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
 class Ball {
   constructor(sys) {
     this.sys = sys;
@@ -70,10 +50,7 @@ class Ball {
     this.labelMat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false });
     this.label = new THREE.Sprite(this.labelMat);
     this.label.renderOrder = 1;
-    this.tag = new THREE.Sprite(sys.tagMat);
-    this.tag.renderOrder = 1;
-    this.tag.visible = false;
-    this.group.add(this.mesh, this.label, this.tag);
+    this.group.add(this.mesh, this.label);
     this.p0 = new THREE.Vector3();
     this.p1 = new THREE.Vector3();
     this.p2 = new THREE.Vector3();
@@ -89,16 +66,25 @@ class Ball {
     this.vx = 0;
     this.vy = 0;
     this.t = 0;
-    this.col = 0;
-    this.bonus = 1;
-    this.hitEmpty = false;
-    this.incoming = 0;
+    this.onFloor = false;
+    this.belowCeiling = false;
+    this.hitCd = 0;
+    this.slowTime = 0;
+    this.anchorX = 0;
+    this.anchorY = 0;
+    this.speedAvg = 0;
+    this.kicks = 0;
+    this.ghost = 0;
+    this.airTime = 0;
+    this.firstImpact = true;
+    this.squashT = -1;
+    this.squashAngle = 0;
+    this.squashAmp = 0;
     this.locked = false;
     this.consumed = false;
     this.lit = false;
     this.popT = -1;
     this.bumpT = -1;
-    this.recoverT = -1;
     this.enterT = -1;
     this.mergeSquash = 0;
     this.stretch = 1;
@@ -137,11 +123,11 @@ export class Balls {
     this.labelTex = new Map();
     this.rainbow = this.makeMaterial('#ff0000', false);
     this.rainbowLit = this.makeMaterial('#ff0000', true);
-    this.tagMat = new THREE.SpriteMaterial({ map: makeTagTexture(), transparent: true, depthWrite: false });
     this.dropTimer = 0;
     this.pendingMerges = 0;
     this.merges = [];
     this.counts = new Int16Array(64);
+    this.phys = []; // scratch list of balls in play (reused every frame)
     this.colorTmp = new THREE.Color();
   }
 
@@ -208,7 +194,6 @@ export class Balls {
     const b = this.pool.pop() || new Ball(this);
     b.reset();
     b.setValue(value);
-    b.tag.visible = false;
     this.scene.add(b.group);
     this.list.push(b);
     return b;
@@ -391,15 +376,16 @@ export class Balls {
 
     pipe.updateQueue(dt, dropper.headDist);
 
-    // Dropper release.
+    // Manual release: while the player holds, one ball every dropInterval.
     this.dropTimer = Math.min(this.dropTimer + dt, CONFIG.dropInterval);
     const head = pipe.queue[0];
     if (
+      dropper.holding &&
       head &&
       !head.locked &&
       head.state === BS.PIPE &&
       this.dropTimer >= CONFIG.dropInterval &&
-      head.dist >= dropper.headDist - 0.03 &&
+      head.dist >= dropper.headDist - CONFIG.releaseCatchUp &&
       dropper.canRelease()
     ) {
       this.release(head);
@@ -409,82 +395,90 @@ export class Balls {
     if (this.pendingMerges > 0 && this.tryStartMerge()) this.pendingMerges--;
     for (let i = this.merges.length - 1; i >= 0; i--) this.updateMerge(this.merges[i], i, dt);
 
-    for (let i = 0; i < this.list.length; i++) this.updateBall(this.list[i], dt);
+    let n = 0;
+    for (let i = 0; i < this.list.length; i++) {
+      const b = this.list[i];
+      this.updateBall(b, dt);
+      if (b.state === BS.PHYS) this.phys[n++] = b;
+    }
+    if (n > 1) collideBalls(this.phys, n);
+    for (let i = 0; i < this.list.length; i++) this.updateVisual(this.list[i], dt);
   }
 
   playZ(b) {
-    return Math.max(G.grid.cell * 0.5, b.radius * 0.8);
-  }
-  frontZ(b) {
-    return G.grid.cell + b.radius + 0.12;
+    return Math.max(G.grid.cell * 0.5, b.radius * 0.9);
   }
 
   release(b) {
     pipe.queue.shift();
-    const grid = G.grid;
-    b.state = BS.FALL;
-    b.vy = CONFIG.fallStartSpeed;
-    b.col = Math.min(grid.cols - 1, Math.max(0, G.dropper.targetCol));
-    b.bonus = G.dropper.isManual() ? CONFIG.aimBonus : 1;
-    b.incoming = b.value * b.bonus;
-    grid.incoming[b.col] += b.incoming;
+    const dropper = G.dropper;
+    const p = b.group.position;
+    p.x = dropper.x;
+    p.y = CONFIG.pipe.topY - CONFIG.pipe.radius * 0.3;
+    b.state = BS.PHYS;
+    b.vx = dropper.v * PH.inheritDropper;
+    b.vy = -PH.releaseSpeed;
+    b.belowCeiling = false;
+    b.onFloor = false;
+    b.hitCd = 0;
+    b.slowTime = 0;
+    b.anchorX = p.x;
+    b.anchorY = p.y;
+    b.speedAvg = 3;
+    b.kicks = 0;
+    b.ghost = 0;
+    b.airTime = 0;
+    b.firstImpact = true;
     b.trailAcc = 0;
     b.bumpT = -1;
-    G.dropper.onRelease(b);
+    dropper.onRelease(b);
     G.audio.release();
   }
 
-  impact(b) {
+  // Physics callback: a ball hit a cube hard enough to damage it.
+  onCubeHit = (b, col, row, nx, ny, speed) => {
     const grid = G.grid;
     const p = b.group.position;
-    b.state = BS.IMPACT;
-    b.t = 0;
-    grid.incoming[b.col] = Math.max(0, grid.incoming[b.col] - b.incoming);
-    b.incoming = 0;
-    b.hitEmpty = grid.isColumnEmpty(b.col);
-    b.tag.visible = false;
-    if (!b.hitEmpty) {
-      G.game.hitValue = b.value;
-      const applied = grid.hit(b.col, b.value * b.bonus, b.value);
-      if (applied > 0) G.economy.earnFromHit(applied, p.x, p.y + b.radius, p.z);
-      G.audio.hit(b.value);
-      if (b.value >= 64) {
-        G.scene.addTrauma(CONFIG.shake.impact64 + (b.level - 6) * CONFIG.shake.impactPerLevel);
-      }
-    } else {
-      G.audio.floor();
-      G.fx.floorPuff(p.x, L.floorY, p.z);
+    G.game.hitValue = b.value;
+    const before = grid.aliveCount;
+    const px = p.x - nx * b.radius;
+    const py = p.y - ny * b.radius;
+    const applied = grid.hitCell(col, row, b.value, b.value, nx, ny, px, py);
+    if (applied > 0) G.economy.earnFromHit(applied, px, py, p.z);
+    G.audio.hit(b.value);
+    if (b.firstImpact && b.value >= 64) {
+      G.scene.addTrauma(CONFIG.shake.impact64 + (b.level - 6) * CONFIG.shake.impactPerLevel);
     }
-  }
+    b.firstImpact = false;
+    return grid.aliveCount < before;
+  };
 
-  startArc(b) {
-    const p = b.group.position;
-    b.p0.copy(p);
-    b.p2.copy(pipe.inletPos);
-    const dx = Math.abs(p.x - b.p2.x);
-    b.p1.set(
-      (p.x + b.p2.x) * 0.5 + (p.x - b.p2.x) * 0.14,
-      Math.max(p.y, b.p2.y) + CONFIG.bounceHeight + dx * CONFIG.arcHeightPerDistance,
-      this.frontZ(b) * 1.7,
-    );
+  // Physics callback: any bounce → squash along the contact normal.
+  onBounce = (b, nx, ny, speed, floor) => {
+    if (speed < 1.2) return;
+    const amp = Math.min(PH.maxSquash, speed * 0.035);
+    if (b.squashT < 0 || amp > b.squashAmp * 0.6) {
+      b.squashT = 0;
+      b.squashAmp = amp;
+      b.squashAngle = Math.atan2(ny, nx) - Math.PI / 2;
+    }
+    if (floor) {
+      G.audio.floor();
+      if (speed > 3) G.fx.floorPuff(b.group.position.x, b.group.position.y - b.radius, b.group.position.z);
+    }
+  };
+
+  startInlet(b) {
+    b.state = BS.INLET;
     b.t = 0;
-    b.state = BS.RETURN;
-    b.recoverT = 0;
-  }
-
-  startRollAir(b) {
-    b.vx = -(1.3 + Math.random() * 0.9);
-    b.vy = 3.4; // up
-    b.state = BS.ROLL_AIR;
-    b.recoverT = 0;
+    b.p0.copy(b.group.position);
   }
 
   enterPipe(b) {
     pipe.enqueue(b);
     b.state = BS.PIPE;
     b.enterT = 0;
-    b.bonus = 1;
-    b.recoverT = -1;
+    b.squashT = -1;
     b.spin = 0;
     G.audio.inlet();
   }
@@ -501,74 +495,70 @@ export class Balls {
 
   updateBall(b, dt) {
     const p = b.group.position;
-    const grid = G.grid;
     switch (b.state) {
       case BS.PIPE: {
         pipe.pointAt(b.dist, p);
         b.hide = b.dist < 0 ? Math.max(0, 1 + b.dist / (b.radius * 2)) : 1;
         break;
       }
-      case BS.FALL: {
-        b.vy += CONFIG.fallGravity * dt;
-        p.y -= b.vy * dt;
-        const tx = grid.colX(b.col);
-        p.x += (tx - p.x) * Math.min(1, dt * 24);
-        p.z += (this.playZ(b) - p.z) * Math.min(1, dt * 16);
-        b.stretch = 1 + Math.min(CONFIG.maxFallStretch, b.vy * CONFIG.fallStretchPerSpeed);
-        const landY = grid.columnTopY(b.col) + b.radius * 0.92;
-        if (p.y <= landY) {
-          p.y = landY;
-          p.x = tx;
-          this.impact(b);
-        } else this.trail(b, dt);
-        break;
-      }
-      case BS.IMPACT: {
-        b.t += dt;
-        if (b.t >= CONFIG.impactSquash.time) {
-          if (CONFIG.returnMode === 'roll') this.startRollAir(b);
-          else this.startArc(b);
+      case BS.PHYS: {
+        b.airTime += dt;
+        if (b.ghost > 0) b.ghost -= dt;
+        p.z += (this.playZ(b) - p.z) * Math.min(1, dt * 14);
+        const res = stepBall(b, G.grid, dt, this.onCubeHit, this.onBounce);
+        if (res === 'inlet' || b.airTime > PH.maxAirTime * 2) {
+          this.startInlet(b);
+          break;
         }
-        break;
-      }
-      case BS.RETURN: {
-        b.t += dt;
-        const u = Math.min(1, b.t / CONFIG.returnDuration);
-        const iu = 1 - u;
-        p.x = iu * iu * b.p0.x + 2 * iu * u * b.p1.x + u * u * b.p2.x;
-        p.y = iu * iu * b.p0.y + 2 * iu * u * b.p1.y + u * u * b.p2.y;
-        p.z = iu * iu * b.p0.z + 2 * iu * u * b.p1.z + u * u * b.p2.z;
-        if (u >= 1) this.enterPipe(b);
-        else this.trail(b, dt);
-        break;
-      }
-      case BS.ROLL_AIR: {
-        b.vy -= CONFIG.fallGravity * dt;
-        p.x += b.vx * dt;
-        p.y += b.vy * dt;
-        p.z += (this.frontZ(b) - p.z) * Math.min(1, dt * 10);
-        const floor = L.floorY + b.radius;
-        if (p.y <= floor && b.vy < 0) {
-          p.y = floor;
-          b.vx = Math.min(b.vx, -2);
-          b.state = BS.ROLL;
-          b.bumpT = 0;
+        if (b.airTime > PH.maxAirTime && b.ghost <= 0) {
+          // Failsafe: drop through the picture to the floor and roll home.
+          b.ghost = 99;
+          b.vx *= 0.3;
+          b.vy = Math.min(b.vy, -1);
+        }
+        // Rolling: the number spins with the ball.
+        b.spin -= (b.vx * dt) / b.radius;
+        // Unstick balls resting on (or rocking in a pocket of) the picture:
+        // if one hasn't really moved for a while, kick it towards a lane.
+        const ax = p.x - b.anchorX;
+        const ay = p.y - b.anchorY;
+        b.speedAvg += (Math.hypot(b.vx, b.vy) - b.speedAvg) * Math.min(1, dt / 0.6);
+        const moved = ax * ax + ay * ay > PH.stuckRadius * PH.stuckRadius;
+        if (moved) {
+          b.anchorX = p.x;
+          b.anchorY = p.y;
+          b.kicks = 0;
+        }
+        if (b.onFloor || (moved && b.speedAvg > PH.slowSpeed)) {
+          b.slowTime = 0;
+        } else {
+          b.slowTime += dt;
+          if (b.slowTime > PH.stuckTime) {
+            b.slowTime = 0;
+            b.kicks++;
+            const toLane = p.x < G.grid.x0 + G.grid.cols * G.grid.cell * 0.5 ? -1 : 1;
+            if (b.kicks >= 3) {
+              // Still trapped in a pocket: slip through the cubes to a lane.
+              b.ghost = 0.45;
+              b.vx = toLane * 4.2;
+              b.vy = 1.5;
+              b.kicks = 0;
+            } else {
+              // Hop up out of the pocket (pockets open upwards), towards a lane.
+              b.vx = toLane * PH.nudgeSpeed * (0.8 + Math.random() * 0.4);
+              b.vy = 5 + Math.random() * 1.5;
+            }
+            b.speedAvg = 3;
+          }
         }
         this.trail(b, dt);
         break;
       }
-      case BS.ROLL: {
-        b.vx = Math.max(b.vx - CONFIG.rollAccel * dt, -CONFIG.rollMaxSpeed);
-        p.x += b.vx * dt;
-        b.spin -= (b.vx * dt) / b.radius;
-        const ip = pipe.inletPos;
-        const k = Math.min(1, Math.max(0, 1 - (p.x - ip.x) / 1.3));
-        p.y = L.floorY + b.radius + (ip.y - L.floorY - b.radius) * k;
-        p.z = this.frontZ(b) + (ip.z - this.frontZ(b)) * k;
-        if (p.x <= ip.x + 0.02) {
-          p.copy(ip);
-          this.enterPipe(b);
-        } else this.trail(b, dt);
+      case BS.INLET: {
+        b.t += dt;
+        const u = Math.min(1, b.t / INLET_TIME);
+        p.lerpVectors(b.p0, pipe.inletPos, u);
+        if (u >= 1) this.enterPipe(b);
         break;
       }
       case BS.SPAWN: {
@@ -586,7 +576,6 @@ export class Balls {
       case BS.ZIP:
         break; // positioned by updateMerge
     }
-    this.updateVisual(b, dt);
   }
 
   updateVisual(b, dt) {
@@ -595,7 +584,6 @@ export class Balls {
     let sx = 1;
     let sy = 1;
     let angle = 0;
-    let squashLabel = false;
 
     if (b.popT >= 0) {
       b.popT += dt;
@@ -611,73 +599,43 @@ export class Balls {
     }
     if (b.lit) s *= 1 + 0.08 * Math.sin(G.time * 48);
 
-    switch (b.state) {
-      case BS.FALL:
-        sy = b.stretch;
-        sx = 1 / Math.sqrt(sy);
-        squashLabel = true;
-        break;
-      case BS.IMPACT: {
-        const I = CONFIG.impactSquash;
-        const k = b.hitEmpty ? 0.5 : 1;
-        sx = 1 + (I.x - 1) * k;
-        sy = 1 + (I.y - 1) * k;
-        squashLabel = true;
-        break;
+    if (b.state === BS.PHYS) {
+      if (b.squashT >= 0) {
+        // Squash along the contact normal, then wobble back.
+        b.squashT += dt;
+        const p = b.squashT / PH.squashTime;
+        if (p >= 1) b.squashT = -1;
+        else {
+          const a = b.squashAmp * (1 - easeOutElastic(p));
+          sy = 1 - a;
+          sx = 1 + a * 0.7;
+          angle = b.squashAngle;
+        }
       }
-      case BS.RETURN:
-      case BS.ROLL_AIR:
-      case BS.ROLL: {
-        if (b.recoverT >= 0) {
-          b.recoverT += dt;
-          const p = b.recoverT / RECOVER_TIME;
-          if (p >= 1) b.recoverT = -1;
-          else {
-            const I = CONFIG.impactSquash;
-            const k = easeOutElastic(p);
-            sx = I.x + (1 - I.x) * k;
-            sy = I.y + (1 - I.y) * k;
-            if (b.hitEmpty) {
-              sx = 1 + (sx - 1) * 0.5;
-              sy = 1 + (sy - 1) * 0.5;
-            }
-            squashLabel = true;
-          }
-        }
-        if (b.state === BS.RETURN) {
-          const u = b.t / CONFIG.returnDuration;
-          if (u > 0.82) s *= 1 - (1 - CONFIG.inletSquish) * ((u - 0.82) / 0.18);
-        }
-        if (b.state === BS.ROLL && b.bumpT >= 0) {
-          b.bumpT += dt;
-          const p = b.bumpT / BUMP_TIME;
-          if (p >= 1) b.bumpT = -1;
-          else {
-            const a = Math.sin(p * Math.PI) * 0.18;
-            sx = 1 + a;
-            sy = 1 - a;
-            squashLabel = true;
-          }
-        }
-        break;
+      if (b.squashT < 0) {
+        // Stretch along the velocity.
+        const speed = Math.hypot(b.vx, b.vy);
+        const st = 1 + Math.min(0.24, speed * 0.016);
+        sy = st;
+        sx = 1 / Math.sqrt(st);
+        angle = Math.atan2(b.vy, b.vx) - Math.PI / 2;
       }
-      case BS.PIPE:
-      case BS.ZIP: {
-        let along = 0;
-        if (b.bumpT >= 0) {
-          b.bumpT += dt;
-          const p = b.bumpT / BUMP_TIME;
-          if (p >= 1) b.bumpT = -1;
-          else along = Math.sin(p * Math.PI) * 0.14;
-        }
-        along = Math.max(along, b.mergeSquash * 0.28);
-        if (along > 0) {
-          pipe.tangentAt(b.dist, _t);
-          angle = Math.atan2(_t.y, _t.x) - Math.PI / 2;
-          sy = 1 - along;
-          sx = 1 + along * 0.7;
-        }
-        break;
+    } else if (b.state === BS.INLET) {
+      s *= 1 - (1 - CONFIG.inletSquish) * Math.min(1, b.t / INLET_TIME);
+    } else if (b.state === BS.PIPE || b.state === BS.ZIP) {
+      let along = 0;
+      if (b.bumpT >= 0) {
+        b.bumpT += dt;
+        const p = b.bumpT / BUMP_TIME;
+        if (p >= 1) b.bumpT = -1;
+        else along = Math.sin(p * Math.PI) * 0.14;
+      }
+      along = Math.max(along, b.mergeSquash * 0.28);
+      if (along > 0) {
+        pipe.tangentAt(b.dist, _t);
+        angle = Math.atan2(_t.y, _t.x) - Math.PI / 2;
+        sy = 1 - along;
+        sx = 1 + along * 0.7;
       }
     }
 
@@ -686,18 +644,7 @@ export class Balls {
 
     const ls = r * CONFIG.labelScale * s;
     b.label.position.set(0, 0, r * 1.02 * s);
-    if (squashLabel) b.label.scale.set(ls * sx, ls * sy, 1);
-    else b.label.scale.set(ls, ls, 1);
-    let rot = 0;
-    if (b.state === BS.PIPE) rot = Math.sin(b.dist * 2.4) * 0.22; // rolling wobble
-    else if (b.state === BS.ROLL) rot = b.spin;
-    b.labelMat.rotation = rot;
-
-    const showTag = b.bonus > 1 && (b.state === BS.FALL || b.state === BS.IMPACT);
-    b.tag.visible = showTag;
-    if (showTag) {
-      b.tag.position.set(r + 0.3, r * 1.1, r + 0.08);
-      b.tag.scale.set(0.8, 0.4, 1);
-    }
+    b.label.scale.set(ls, ls, 1);
+    b.labelMat.rotation = b.state === BS.PIPE ? Math.sin(b.dist * 2.4) * 0.22 : b.spin;
   }
 }

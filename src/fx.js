@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { G } from './state.js';
 import { formatMoney } from './economy.js';
+import { rampY } from './physics.js';
 
 // ─── Easing ──────────────────────────────────────────────────────────────
 export const easeInQuad = (t) => t * t;
@@ -28,7 +29,6 @@ export function popScale(t) {
 }
 
 const rand = (a, b) => a + Math.random() * (b - a);
-const FLOOR = CONFIG.layout.floorY;
 const CONFETTI = ['#ff3d6e', '#ffd23f', '#2f8bff', '#2fc350', '#a257ff', '#ff9412', '#ffffff', '#0fb5a4'].map(
   (h) => new THREE.Color(h),
 );
@@ -369,15 +369,20 @@ export class FX {
   }
 
   // ── 3D effects ───────────────────────────────────────────────────────
-  cubeHit(x, y, z, r, g, b, cell, isMain) {
+  // Chips spray out of the hit face (along its normal) in a cone.
+  cubeHit(x, y, z, r, g, b, cell, isMain, nx = 0, ny = 1) {
     const c = this.color.setRGB(r, g, b);
     const n = isMain ? 4 + ((Math.random() * 3) | 0) : 2;
+    const tx = -ny;
+    const ty = nx;
     for (let i = 0; i < n; i++) {
       const s = cell * rand(0.12, 0.2);
+      const out = rand(2.6, 5.2);
+      const side = rand(-1.8, 1.8);
       this.debris.spawn(
-        x + rand(-0.3, 0.3) * cell, y, z + cell * 0.6,
-        rand(-1.8, 1.8), rand(3, 5.8), rand(0.3, 2.2),
-        s, s, s, c, rand(0.32, 0.5), FLOOR, 24, 0.5, 0,
+        x + tx * rand(-0.3, 0.3) * cell, y + ty * rand(-0.3, 0.3) * cell, z + cell * 0.6,
+        nx * out + tx * side, ny * out + ty * side + 1, rand(0.3, 2.2),
+        s, s, s, c, rand(0.32, 0.5), rampY(x), 24, 0.5, 0,
       );
     }
   }
@@ -390,7 +395,7 @@ export class FX {
       this.debris.spawn(
         x + rand(-0.3, 0.3) * cell, y + rand(-0.3, 0.3) * cell, z + rand(-0.2, 0.3) * cell,
         rand(-3.2, 3.2), rand(1.2, 6), rand(0.6, 3.6),
-        s, s, s, c, CONFIG.debrisLife * rand(0.8, 1.25), FLOOR, 20, 0.4, 0,
+        s, s, s, c, CONFIG.debrisLife * rand(0.8, 1.25), rampY(x), 20, 0.4, 0,
       );
     }
     this.glow.spawn(x, y, z + cell * 0.6, 0, 0, 0, cell * 0.5, cell * 2.8, WHITE, 0.95, 0, 0.3, 1);
@@ -403,7 +408,7 @@ export class FX {
       this.debris.spawn(
         x, y, z,
         rand(-6, 6), rand(3, 10), rand(1, 5),
-        s, s, s, color, rand(0.8, 1.2), FLOOR, 20, 0.3, 0,
+        s, s, s, color, rand(0.8, 1.2), rampY(x), 20, 0.3, 0,
       );
     }
     this.glow.spawn(x, y, z + 0.6, 0, 0, 0, 0.4, 7, WHITE, 1, 0, 0.55, 1);

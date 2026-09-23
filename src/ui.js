@@ -1,5 +1,6 @@
 // HTML overlay: money counter, picture label, progress bar, upgrade buttons,
 // mute + settings (reset progress). DOM is only touched when values change.
+import { CONFIG } from './config.js';
 import { G, state, resetSave } from './state.js';
 import { formatMoney } from './economy.js';
 
@@ -22,6 +23,8 @@ export class UI {
     this.progressText = $('progress-text');
     this.incomeMult = $('income-mult');
     this.muteBtn = $('btn-mute');
+    this.hint = $('hint');
+    this.hintShown = false;
 
     this.buttons = {};
     for (const kind of KINDS) {
@@ -265,5 +268,13 @@ export class UI {
     }
 
     this.refreshButtons();
+
+    // "Hold to drop" hint until the first press, and again after idling.
+    const d = G.dropper;
+    const idle = !d.holding && (!d.everHeld || G.realTime - d.lastInput > CONFIG.hintIdle);
+    if (idle !== this.hintShown) {
+      this.hintShown = idle;
+      this.hint.classList.toggle('hidden', !idle);
+    }
   }
 }

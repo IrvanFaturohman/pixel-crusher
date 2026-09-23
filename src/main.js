@@ -44,7 +44,7 @@ async function boot() {
   G.debug = new Debug(document.getElementById('debug'));
   G.board.onBgChange.push((c) => G.ui.setBackground(c));
   G.board.setBackground(G.grid.picture.bg);
-  G.dropper.snapToTarget();
+  G.dropper.center();
   G.balls.spawnInitial(state.ballValues);
 
   // The AudioContext can only start from a user gesture.
@@ -68,9 +68,10 @@ async function boot() {
   // Step the simulation manually (for testing when rAF is throttled).
   G.advance = (seconds, fps = 60) => {
     const n = Math.round(seconds * fps);
+    const sub = Math.max(1, Math.ceil(1 / fps / CONFIG.maxSubstep - 1e-6));
     for (let i = 0; i < n; i++) {
       G.realTime += 1 / fps;
-      step(1 / fps);
+      for (let k = 0; k < sub; k++) step(1 / fps / sub);
       G.scene.update(1 / fps);
       G.ui.update(1 / fps);
       G.fx.updateOverlay(1 / fps);

@@ -6,7 +6,7 @@
 export const CONFIG = {
   // ─── Simulation / rendering ──────────────────────────────────────────────
   maxDelta: 0.05, // s — frame delta is clamped to this (tabbing out can't break the sim)
-  maxSubstep: 1 / 60, // s — sim runs in substeps no longer than this (keeps ×10 speed stable)
+  maxSubstep: 1 / 120, // s — sim runs in substeps no longer than this (stable physics, ×10 speed)
   maxPixelRatio: 2, // cap on devicePixelRatio
   shadows: true, // soft real-time shadows from the key light
   shadowMapSize: 1024, // shadow map resolution (px)
@@ -20,12 +20,14 @@ export const CONFIG = {
     boardRadius: 0.8, // rounded-corner radius of the panel
     frameWidth: 0.3, // width of the raised white frame around the panel
     frameDepth: 0.34, // how far the frame sticks out towards the camera
-    floorY: -6.0, // top of the floor ledge — pictures stand on it
-    ledgeDepth: 1.3, // how far the floor ledge sticks out towards the camera
-    picLeft: -2.75, // picture area: left edge (right of the pipe inlet)
-    picRight: 4.35, // picture area: right edge (dropper must reach every column)
-    picTop: 2.5, // picture area: highest allowed top edge (leaves room to fall)
-    maxCell: 0.46, // largest cube size for small pictures
+    floorY: -6.0, // height of the sloped floor at the inlet mouth (its lowest point)
+    rampSlope: 0.17, // floor rises this much per unit to the right, so balls roll into the inlet
+    rampDepth: 1.1, // how far the floor ramp sticks out towards the camera
+    picCenterX: 0.62, // picture floats centred here, leaving open lanes on both sides…
+    picCenterY: -0.2, // …and room underneath for balls to fall to the floor
+    picMaxW: 5.2, // max picture width (world units)
+    picMaxH: 5.2, // max picture height
+    maxCell: 0.34, // largest cube size for small pictures
     cubeGap: 0.9, // cube size as a fraction of its cell (gaps make cubes read as 3D)
     patternTile: 1.3, // size of one tile of the background pattern
     cameraFov: 30, // vertical FOV (deg) — low = nearly orthographic
@@ -35,43 +37,55 @@ export const CONFIG = {
 
   // ─── Pipe ────────────────────────────────────────────────────────────────
   pipe: {
-    radius: 0.52, // tube radius (the biggest ball must fit: see ballSizeCap)
-    inletX: -3.25, // x of the inlet mouth (bottom-left); mouth faces +X
-    leftX: -4.2, // x of the vertical left run
+    radius: 0.42, // tube radius (the biggest ball must fit: see ballSizeCap)
+    inletX: -3.38, // x of the inlet mouth (bottom-left); mouth faces +X, the floor ends here
+    leftX: -4.2, // x of the vertical left run (its inner edge is the left wall)
     topY: 5.85, // y of the horizontal top run (dropper rides on it)
-    rightX: 4.2, // x where the top run ends (closed cap)
-    inletBend: 0.72, // radius of the bend from the inlet into the left run
+    rightX: 4.3, // x where the top run ends (closed cap)
+    inletBend: 0.62, // radius of the bend from the inlet into the left run
     cornerRadius: 0.95, // radius of the top-left corner
   },
   pipeSpeed: 10, // world units / s a ball travels along the pipe
   ballSpacing: 0.03, // extra gap kept between neighbouring balls in the pipe (0 = touching)
   pipeCapacity: 16, // max balls in play (falling/returning ones count too)
 
-  // ─── Dropper ────────────────────────────────────────────────────────────
-  dropInterval: 0.3, // s between two releases
-  dropperStiffness: 300, // spring constant pulling the dropper to its aim X
-  dropperDamping: 32, // spring damping (≈ 2·√stiffness = critically damped)
-  releaseTolerance: 0.08, // world units — dropper must be this close to its target to release
-  releaseMaxSpeed: 3, // world units / s — ...and moving slower than this
+  // ─── Dropper (manual: hold to drop, drag to aim) ─────────────────────────
+  dropInterval: 0.28, // s between two releases while holding
+  dropperStiffness: 520, // spring constant pulling the dropper towards the finger
+  dropperDamping: 46, // spring damping (≈ 2·√stiffness = critically damped)
+  releaseCatchUp: 0.35, // world units — head ball may lag the ring by this much and still drop
+  hintIdle: 6, // s without input before the "hold to drop" hint shows again
 
-  // ─── Falling / returning ────────────────────────────────────────────────
-  fallGravity: 42, // world units / s² — falling acceleration
-  fallStartSpeed: 1.5, // initial downward speed when released
-  maxFallStretch: 0.32, // max vertical stretch while falling (0.32 = 132%)
-  fallStretchPerSpeed: 0.022, // stretch added per unit of fall speed
-  impactSquash: { x: 1.3, y: 0.7, time: 0.08 }, // squash shape + hold time on impact
-  returnMode: 'arc', // 'arc' = fly in an arc into the inlet, 'roll' = drop to floor & roll in
-  returnDuration: 0.45, // s — arc flight time back to the inlet
-  bounceHeight: 1.3, // extra apex height of the return arc
-  arcHeightPerDistance: 0.22, // extra apex height per unit of horizontal distance
-  rollAccel: 16, // 'roll' mode: acceleration along the floor towards the inlet
-  rollMaxSpeed: 12, // 'roll' mode: top rolling speed
+  // ─── Ball physics (2D, no engine) ───────────────────────────────────────
+  physics: {
+    gravity: 24, // world units / s²
+    maxSpeed: 14, // speed cap (keeps substeps tunnel-free)
+    releaseSpeed: 1.2, // initial downward speed when dropped
+    inheritDropper: 0.25, // fraction of the dropper's sideways speed given to the ball
+    cubeRestitution: 0.6, // bounciness off cubes
+    cubeRound: 0.22, // cube corner rounding (fraction of a cell) — seams deflect balls
+    breakRestitution: 0.4, // bounciness when the hit breaks the cube
+    wallRestitution: 0.6, // bounciness off the side walls / ceiling
+    floorRestitution: 0.25, // bounciness off the floor ramp (low = rolls)
+    ballRestitution: 0.7, // bounciness between balls
+    friction: 0.08, // tangential speed lost per hard impact (scaled by impact speed)
+    bounceJitter: 1.3, // random sideways kick on cube bounces (natural scatter)
+    minImpactSpeed: 1.0, // slower touches deal no damage (resting contact)
+    hitCooldown: 0.05, // s between two damaging hits of the same ball
+    stuckRadius: 0.5, // a ball that stays within this distance off the floor…
+    slowSpeed: 1.3, // …or dawdles slower than this on average (smoothed)…
+    stuckTime: 0.8, // …for this long gets kicked towards a lane
+    nudgeSpeed: 2.2, // sideways speed of that kick (it also hops the ball upwards)
+    maxAirTime: 12, // failsafe: a ball in play longer than this falls through the cubes
+    squashTime: 0.28, // s of the squash wobble after a bounce
+    maxSquash: 0.3, // max squash amount on a hard bounce
+  },
   inletSquish: 0.72, // scale a ball shrinks to as it enters the inlet
 
   // ─── Balls ──────────────────────────────────────────────────────────────
-  ballBaseRadius: 0.3, // radius of a "2" ball
+  ballBaseRadius: 0.24, // radius of a "2" ball
   ballSizeGrowth: 0.06, // +6% radius per level (4 = level 2, 8 = level 3 …)
-  ballSizeCap: 1.6, // max radius multiplier (0.3 × 1.6 = 0.48 < pipe radius)
+  ballSizeCap: 1.55, // max radius multiplier (0.24 × 1.55 = 0.37 < pipe radius)
   ballColors: {
     2: '#2f7dff', // blue
     4: '#ff3d6e', // red-pink
@@ -92,12 +106,14 @@ export const CONFIG = {
   labelScale: 1.55, // number sprite size relative to the ball radius
 
   // ─── Pictures / cubes ───────────────────────────────────────────────────
-  cubeBaseHP: 2, // HP of every cube in the first picture
+  cubeBaseHP: 4, // HP of every cube in the first picture (a "2" ball needs 2 bounces)
   cubeHPGrowth: 1.7, // HP multiplier per picture index (HP = base · growth^index)
-  // Splash rules by ball value. The last row whose minValue ≤ ball value wins.
-  //   width   — extra columns hit on EACH side of the target column
-  //   splash  — damage fraction dealt to those side columns' top cubes
-  //   below   — damage fraction dealt to the cube right under the target cube
+  // Splash rules by ball value, applied on EVERY damaging bounce. The last row
+  // whose minValue ≤ ball value wins. Directions follow the hit: a hit on a top
+  // face spreads sideways, a hit on a side face spreads up/down.
+  //   width   — extra cubes hit on EACH side of the hit cube (across the hit face)
+  //   splash  — damage fraction dealt to those cubes
+  //   below   — damage fraction dealt to the cube behind the hit cube
   //   falloff — side damage fades linearly with distance (1 → splash, width → splash/width)
   splashTable: [
     { minValue: 2, width: 0, splash: 0, below: 0, falloff: false },
@@ -110,15 +126,13 @@ export const CONFIG = {
   buildDuration: 1.2, // s — new picture build-in wave (bottom row first)
   buildDropHeight: 2.6, // world units cubes drop from during build-in
 
-  // ─── Aim ────────────────────────────────────────────────────────────────
-  aimBonus: 1.5, // damage multiplier for balls dropped while manually aiming
-  autoResumeDelay: 2, // s after release before auto-aim takes over again
+  // ─── Aim line ───────────────────────────────────────────────────────────
   aimDotSpacing: 0.3, // world units between dots of the aim line
   aimDotSpeed: 2.2, // world units / s the aim-line dots scroll downwards
 
   // ─── Economy ────────────────────────────────────────────────────────────
   startMoney: 0, // money on a fresh save
-  startBalls: [2, 2, 2], // balls on a fresh save
+  startBalls: [2], // balls on a fresh save
   upgrades: {
     add: { baseCost: 10, growth: 1.28 }, // Add Ball
     merge: { baseCost: 25, growth: 1.35 }, // Merge

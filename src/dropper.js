@@ -1,15 +1,16 @@
-// Dropper ring on the top pipe, dotted aim line, landing marker,
-// auto-aim (highest column) and manual drag aim with an aim bonus.
+// Dropper ring on the top pipe, dotted aim line and landing marker.
+// Fully manual: press & hold anywhere on the board to drop balls, drag to aim,
+// release to stop. The ring follows the finger with a spring.
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { G } from './state.js';
 import * as pipe from './pipe.js';
+import { rampY } from './physics.js';
 import { easeOutElastic } from './fx.js';
 
 const P = CONFIG.pipe;
 const R = P.radius;
 const SQUASH_TIME = 0.38;
-const L_FLOOR = CONFIG.layout.floorY;
 const LINE_TOP = P.topY - R - 0.42; // just under the funnel
 const WHITE = new THREE.Color('#ffffff');
 const GOLD = new THREE.Color('#ffd23f');
@@ -47,16 +48,16 @@ export class Dropper {
     goldInside.side = THREE.DoubleSide;
 
     this.group = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(R + 0.1, 0.14, 16, 44), gold);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(R + 0.1, 0.13, 16, 44), gold);
     ring.castShadow = true;
-    const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.3, 0.36, 28, 1, true), goldInside);
-    funnel.position.y = -R - 0.2;
+    const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.27, 0.32, 28, 1, true), goldInside);
+    funnel.position.y = -R - 0.18;
     funnel.castShadow = true;
-    const lip = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.06, 10, 28), gold);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.055, 10, 28), gold);
     lip.rotation.x = Math.PI / 2;
-    lip.position.y = -R - 0.38;
-    const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.62), gold);
-    clamp.position.y = R + 0.2;
+    lip.position.y = -R - 0.34;
+    const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.56), gold);
+    clamp.position.y = R + 0.19;
     this.group.add(ring, funnel, lip, clamp);
     this.group.position.set(0, P.topY, pipe.pipeZ);
     scene.add(this.group);
@@ -84,15 +85,13 @@ export class Dropper {
     this.x = 0;
     this.v = 0;
     this.targetX = 0;
-    this.targetCol = 0;
-    this.pointerDown = false;
+    this.holding = false;
     this.pointerId = -1;
-    this.manualUntil = -1;
-    this.wasManual = false;
+    this.lastInput = 0; // real time of the last press (drives the hint)
+    this.everHeld = false;
     this.paused = false;
     this.squashT = -1;
     this.scroll = 0;
-    this.gridVersion = -1;
     this.pulse = 0;
 
     this.bindInput(canvas);
@@ -103,10 +102,10 @@ export class Dropper {
   }
 
   clampX(x) {
-    return Math.min(P.rightX - 0.05, Math.max(pipe.topRunMinX + 0.35, x));
+    return Math.min(P.rightX - 0.05, Math.max(pipe.topRunMinX + 0.3, x));
   }
 
-  // ── Input: press & drag anywhere on the board ─────────────────────────
+  // ── Input: press & hold anywhere on the board ─────────────────────────
   bindInput(canvas) {
     const toWorldX = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -115,8 +114,10 @@ export class Dropper {
     };
     canvas.addEventListener('pointerdown', (e) => {
       if (!e.isPrimary) return;
-      this.pointerDown = true;
+      this.holding = true;
+      this.everHeld = true;
       this.pointerId = e.pointerId;
+      this.lastInput = G.realTime;
       try {
         canvas.setPointerCapture(e.pointerId);
       } catch {
@@ -126,76 +127,42 @@ export class Dropper {
       if (x !== null) this.aimAt(x);
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (!this.pointerDown || e.pointerId !== this.pointerId) return;
+      if (!this.holding || e.pointerId !== this.pointerId) return;
+      this.lastInput = G.realTime;
       const x = toWorldX(e);
       if (x !== null) this.aimAt(x);
     });
     const up = (e) => {
       if (e.pointerId !== this.pointerId) return;
-      this.pointerDown = false;
-      this.manualUntil = G.realTime + CONFIG.autoResumeDelay;
+      this.holding = false;
+      this.lastInput = G.realTime;
     };
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
   }
 
-  // Manual aim: clamp to the picture, snap to column centres.
   aimAt(worldX) {
+    this.targetX = this.clampX(worldX);
+  }
+
+  // Start above the middle of the picture.
+  center() {
     const grid = G.grid;
-    this.targetCol = grid.colAt(worldX);
-    this.targetX = this.clampX(grid.colX(this.targetCol));
-  }
-
-  isManual() {
-    return this.pointerDown || G.realTime < this.manualUntil;
-  }
-
-  retarget() {
-    const c = G.grid.autoAimColumn();
-    if (c < 0) return;
-    this.targetCol = c;
-    this.targetX = this.clampX(G.grid.colX(c));
-  }
-
-  snapToTarget() {
-    this.retarget();
-    this.x = this.targetX;
+    this.targetX = this.x = this.clampX(grid.x0 + grid.cols * grid.cell * 0.5);
     this.v = 0;
   }
 
   canRelease() {
-    const grid = G.grid;
-    return (
-      !this.paused &&
-      !grid.building &&
-      grid.aliveCount > 0 &&
-      Math.abs(this.x - this.targetX) < CONFIG.releaseTolerance &&
-      Math.abs(this.v) < CONFIG.releaseMaxSpeed
-    );
+    return !this.paused && !G.grid.building && G.grid.aliveCount > 0;
   }
 
   onRelease() {
     this.squashT = 0;
     G.fx.puff(this.x, LINE_TOP + 0.05, pipe.pipeZ);
-    if (!this.isManual()) this.retarget(); // re-evaluate after each drop
   }
 
   update(dt) {
-    const grid = G.grid;
-    if (grid.version !== this.gridVersion) {
-      this.gridVersion = grid.version;
-      if (!this.isManual()) this.retarget();
-    }
-    if (this.isManual()) this.wasManual = true;
-    else {
-      if (this.wasManual) {
-        this.wasManual = false;
-        this.retarget();
-      }
-      if (this.targetCol >= grid.cols || grid.top[this.targetCol] < 0) this.retarget();
-    }
-
-    // Spring towards the aim X (never teleports).
+    // Spring towards the finger (never teleports).
     const a = CONFIG.dropperStiffness * (this.targetX - this.x) - CONFIG.dropperDamping * this.v;
     this.v += a * dt;
     this.x += this.v * dt;
@@ -216,33 +183,32 @@ export class Dropper {
     this.group.position.x = this.x;
     this.group.scale.set(sx, sy, 1);
 
-    // Aim line + landing marker.
+    // Aim line + landing marker: first thing straight below the ring.
+    const grid = G.grid;
     const show = !this.paused && !grid.building && grid.aliveCount > 0;
     this.line.visible = show;
     this.marker.visible = show;
     if (!show) return;
-    const manual = this.isManual();
     const col = grid.colAt(this.x);
-    const empty = grid.isColumnEmpty(col);
-    const landY = grid.columnTopY(col);
+    const top = col >= 0 ? grid.columnTopY(col) : null;
+    const landY = top !== null ? top : rampY(this.x);
     const len = Math.max(0.05, LINE_TOP - landY);
     const zLine = grid.cell * 0.5;
     this.line.position.set(this.x, LINE_TOP, zLine);
-    this.line.scale.set(manual ? 0.2 : 0.15, len, 1);
+    this.line.scale.set(this.holding ? 0.18 : 0.14, len, 1);
     const rep = len / CONFIG.aimDotSpacing;
-    this.scroll = (this.scroll + (dt * CONFIG.aimDotSpeed) / CONFIG.aimDotSpacing) % 1;
+    this.scroll = (this.scroll + (dt * CONFIG.aimDotSpeed * (this.holding ? 2 : 1)) / CONFIG.aimDotSpacing) % 1;
     this.dotTex.repeat.set(1, rep);
     this.dotTex.offset.set(0, this.scroll - rep);
-    this.lineMat.color.copy(manual ? GOLD : WHITE);
-    this.lineMat.opacity = manual ? 1 : 0.8;
+    this.lineMat.color.copy(this.holding ? GOLD : WHITE);
+    this.lineMat.opacity = this.holding ? 1 : 0.7;
 
     this.pulse += dt;
     const cell = grid.cell;
-    const ms = cell * (1.02 + Math.sin(this.pulse * 9) * 0.08) * (manual ? 1.12 : 1);
+    const ms = cell * (1.02 + Math.sin(this.pulse * 9) * 0.08) * (this.holding ? 1.15 : 1);
     this.marker.scale.set(ms, ms, 1);
-    this.markerMat.color.copy(manual ? GOLD : WHITE);
-    if (empty) this.marker.position.set(grid.colX(col), L_FLOOR + cell * 0.5, cell + 0.03);
-    else this.marker.position.set(grid.colX(col), landY - cell * 0.5, cell + 0.03);
+    this.markerMat.color.copy(this.holding ? GOLD : WHITE);
+    if (top !== null) this.marker.position.set(grid.colX(col), top - cell * 0.5, cell + 0.03);
+    else this.marker.position.set(this.x, landY + cell * 0.5, CONFIG.layout.rampDepth * 0.5);
   }
 }
-

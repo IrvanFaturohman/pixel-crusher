@@ -539,6 +539,81 @@ button {
   paint-order: stroke fill;
 }
 
+/* ─── Hold-to-drop hint ───────────────────────────────── */
+.hint {
+  position: absolute;
+  left: 50%;
+  top: 31%;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1cqw;
+  transform: translateX(-50%);
+  pointer-events: none;
+  font-weight: 700;
+  white-space: nowrap;
+  animation: hintIn 0.4s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+
+.hint span {
+  margin-top: 13cqw;
+  font-size: 6.4cqw;
+  color: #fff;
+  -webkit-text-stroke: 1.2cqw #1d2a55;
+  paint-order: stroke fill;
+  text-shadow: 0 0.8cqw 0 rgb(0 0 0 / 0.25);
+  animation: hintBob 1.2s ease-in-out infinite;
+}
+
+.hint small {
+  font-size: 4cqw;
+  color: #ffe45c;
+  -webkit-text-stroke: 0.9cqw #1d2a55;
+  paint-order: stroke fill;
+}
+
+.hint-dot,
+.hint-ring {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 10cqw;
+  height: 10cqw;
+  margin-left: -5cqw;
+  border-radius: 50%;
+}
+
+.hint-dot {
+  background: rgb(255 255 255 / 0.9);
+  box-shadow: 0 0.8cqw 0 rgb(0 0 0 / 0.2);
+  animation: hintPress 1.2s ease-in-out infinite;
+}
+
+.hint-ring {
+  border: 1.2cqw solid #fff;
+  animation: hintRing 1.2s ease-out infinite;
+}
+
+@keyframes hintIn {
+  from { transform: translateX(-50%) scale(0.5); opacity: 0; }
+}
+
+@keyframes hintBob {
+  50% { transform: translateY(-1cqw); }
+}
+
+@keyframes hintPress {
+  0%, 100% { transform: scale(1); }
+  30%, 60% { transform: scale(0.8); }
+}
+
+@keyframes hintRing {
+  0% { transform: scale(0.8); opacity: 0; }
+  30% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
 /* ─── Settings modal ──────────────────────────────────── */
 .modal {
   position: absolute;
