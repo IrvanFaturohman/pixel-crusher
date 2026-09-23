@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#16213b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Pixel Crusher</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+
+      <!-- Top HUD -->
+      <div id="hud">
+        <div class="hud-row">
+          <div class="money-pill" id="money-pill">
+            <span class="coin-icon" id="money-coin"></span>
+            <span class="money-text" id="money">0</span>
+          </div>
+          <div class="hud-right">
+            <div class="pic-pill"><span class="pic-num" id="pic-num">#1</span><span id="pic-name">Apple</span></div>
+            <button class="icon-btn" id="btn-mute" aria-label="Toggle sound">
+              <svg class="ico-on" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /></svg>
+              <svg class="ico-off" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="wave" d="M16.5 9.5l5 5M21.5 9.5l-5 5" /></svg>
+            </button>
+            <button class="icon-btn" id="btn-settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8.4 5.1 1.6 1.2-2 3.4-1.9-.7a7.9 7.9 0 0 1-2.1 1.2l-.3 2h-4l-.3-2a7.9 7.9 0 0 1-2.1-1.2l-1.9.7-2-3.4 1.6-1.2a8 8 0 0 1 0-2.4L1.4 9.9l2-3.4 1.9.7a7.9 7.9 0 0 1 2.1-1.2l.3-2h4l.3 2a7.9 7.9 0 0 1 2.1 1.2l1.9-.7 2 3.4-1.6 1.3a8 8 0 0 1 0 2.4z" /></svg>
+            </button>
+          </div>
+        </div>
+        <div class="progress" id="progress">
+          <div class="progress-fill" id="progress-fill"></div>
+          <i class="tick" style="left: 25%"></i><i class="tick" style="left: 50%"></i><i class="tick" style="left: 75%"></i>
+          <span class="progress-text" id="progress-text">0%</span>
+        </div>
+      </div>
+
+      <!-- Upgrade buttons -->
+      <div id="bar">
+        <button class="upg" id="upg-add" data-kind="add">
+          <span class="upg-lvl">Lv <b>0</b></span>
+          <span class="upg-icon">
+            <svg viewBox="0 0 48 48"><circle cx="21" cy="28" r="15" fill="#fff" /><ellipse cx="15" cy="22" rx="4.5" ry="3.2" fill="#d6e8ff" /><circle cx="36" cy="12" r="10" fill="#ffd23f" stroke="#fff" stroke-width="3" /><path d="M36 7v10M31 12h10" stroke="#8a4b00" stroke-width="3.4" stroke-linecap="round" /></svg>
+          </span>
+          <span class="upg-name">Add Ball</span>
+          <span class="upg-cost"><i class="coin-icon sm"></i><b>10</b></span>
+          <span class="upg-reason">FULL — MERGE!</span>
+        </button>
+        <button class="upg" id="upg-merge" data-kind="merge">
+          <span class="upg-lvl">Lv <b>0</b></span>
+          <span class="upg-icon">
+            <svg viewBox="0 0 48 48"><circle cx="10" cy="13" r="7.5" fill="#fff" /><circle cx="10" cy="35" r="7.5" fill="#fff" /><path d="M19 13q7 0 8.5 8M19 35q7 0 8.5-8" stroke="#fff" stroke-width="3.6" fill="none" stroke-linecap="round" /><circle cx="36.5" cy="24" r="10.5" fill="#ffd23f" stroke="#fff" stroke-width="3" /><text x="36.5" y="29" text-anchor="middle" font-size="13" font-weight="700" fill="#8a4b00" font-family="Fredoka, sans-serif">×2</text></svg>
+          </span>
+          <span class="upg-name">Merge</span>
+          <span class="upg-cost"><i class="coin-icon sm"></i><b>25</b></span>
+          <span class="upg-reason">NO PAIR</span>
+        </button>
+        <button class="upg" id="upg-income" data-kind="income">
+          <span class="upg-lvl">Lv <b>0</b></span>
+          <span class="upg-icon">
+            <svg viewBox="0 0 48 48"><circle cx="21" cy="28" r="15" fill="#fff" /><text x="21" y="35.5" text-anchor="middle" font-size="21" font-weight="700" fill="#e38a00" font-family="Fredoka, sans-serif">$</text><path d="M36 3.5l8 9h-5v8h-6v-8h-5z" fill="#fff" stroke="#e38a00" stroke-width="1.6" stroke-linejoin="round" /></svg>
+          </span>
+          <span class="upg-name">Income <em id="income-mult">×1</em></span>
+          <span class="upg-cost"><i class="coin-icon sm"></i><b>60</b></span>
+          <span class="upg-reason"></span>
+        </button>
+      </div>
+
+      <!-- Popups, coins, combo, banner -->
+      <div id="fx-layer">
+        <div id="combo" class="combo"></div>
+        <div id="banner" class="banner"><span>COMPLETE!</span><small id="banner-sub"></small></div>
+      </div>
+
+      <!-- Settings -->
+      <div id="modal" class="modal hidden">
+        <div class="card">
+          <div class="card-view" id="view-settings">
+            <h2>Settings</h2>
+            <label class="row"><span>Sound</span><input type="checkbox" id="opt-sound" /><i class="switch"></i></label>
+            <label class="row"><span>Vibration</span><input type="checkbox" id="opt-vibrate" /><i class="switch"></i></label>
+            <button class="btn danger" id="btn-reset">Reset progress</button>
+            <button class="btn" id="btn-close">Close</button>
+          </div>
+          <div class="card-view hidden" id="view-confirm">
+            <h2>Reset progress?</h2>
+            <p>All money, balls, upgrades and pictures will be lost.</p>
+            <button class="btn danger" id="btn-reset-yes">Yes, reset</button>
+            <button class="btn" id="btn-reset-no">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="debug" class="debug hidden"></div>
+      <div id="loading" class="loading"><div class="spinner"></div></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
