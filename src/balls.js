@@ -75,6 +75,9 @@ class Ball {
     this.speedAvg = 0;
     this.kicks = 0;
     this.ghost = 0;
+    this.boxX0 = 0;
+    this.boxY0 = 0;
+    this.boxT = 0;
     this.airTime = 0;
     this.firstImpact = true;
     this.squashT = -1;
@@ -429,6 +432,9 @@ export class Balls {
     b.speedAvg = 3;
     b.kicks = 0;
     b.ghost = 0;
+    b.boxX0 = p.x;
+    b.boxY0 = p.y;
+    b.boxT = 0;
     b.airTime = 0;
     b.firstImpact = true;
     b.trailAcc = 0;
@@ -456,18 +462,19 @@ export class Balls {
   };
 
   // Physics callback: any bounce → squash along the contact normal.
-  onBounce = (b, nx, ny, speed, floor) => {
+  // kind: 0 = cube, 1 = floor, 2 = wall / ceiling.
+  onBounce = (b, nx, ny, speed, kind) => {
     if (speed < 1.2) return;
-    const amp = Math.min(PH.maxSquash, speed * 0.035);
+    const amp = Math.min(PH.maxSquash, speed * 0.045);
     if (b.squashT < 0 || amp > b.squashAmp * 0.6) {
       b.squashT = 0;
       b.squashAmp = amp;
       b.squashAngle = Math.atan2(ny, nx) - Math.PI / 2;
     }
-    if (floor) {
+    if (kind === 1) {
       G.audio.floor();
       if (speed > 3) G.fx.floorPuff(b.group.position.x, b.group.position.y - b.radius, b.group.position.z);
-    }
+    } else if (kind === 2) G.audio.bounce(b.level);
   };
 
   startInlet(b) {
@@ -530,6 +537,17 @@ export class Balls {
           b.anchorX = p.x;
           b.anchorY = p.y;
           b.kicks = 0;
+        }
+        // Bouncing around inside one small pocket for too long → slip out.
+        if (b.onFloor || p.x < b.boxX0 - PH.pocketW || p.x > b.boxX0 + PH.pocketW || p.y < b.boxY0 - PH.pocketH || p.y > b.boxY0 + PH.pocketH) {
+          b.boxX0 = p.x;
+          b.boxY0 = p.y;
+          b.boxT = 0;
+        } else if ((b.boxT += dt) > PH.pocketTime) {
+          b.boxT = 0;
+          b.ghost = 0.45;
+          b.vx = (p.x < G.grid.x0 + G.grid.cols * G.grid.cell * 0.5 ? -1 : 1) * 4.2;
+          b.vy = 1.5;
         }
         if (b.onFloor || (moved && b.speedAvg > PH.slowSpeed)) {
           b.slowTime = 0;

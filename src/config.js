@@ -45,7 +45,7 @@ export const CONFIG = {
     inletBend: 0.62, // radius of the bend from the inlet into the left run
     cornerRadius: 0.95, // radius of the top-left corner
   },
-  pipeSpeed: 10, // world units / s a ball travels along the pipe
+  pipeSpeed: 13, // world units / s a ball travels along the pipe
   ballSpacing: 0.03, // extra gap kept between neighbouring balls in the pipe (0 = touching)
   pipeCapacity: 16, // max balls in play (falling/returning ones count too)
 
@@ -60,25 +60,29 @@ export const CONFIG = {
 
   // ─── Ball physics (2D, no engine) ───────────────────────────────────────
   physics: {
-    gravity: 24, // world units / s²
+    gravity: 22, // world units / s²
     maxSpeed: 14, // speed cap (keeps substeps tunnel-free)
-    cubeRestitution: 0.6, // bounciness off cubes
+    cubeRestitution: 0.82, // bounciness off cubes
+    minBounce: 4.4, // every real cube hit springs back at least this fast (arcade bounce)
     cubeRound: 0.22, // cube corner rounding (fraction of a cell) — seams deflect balls
-    breakRestitution: 0.4, // bounciness when the hit breaks the cube
-    wallRestitution: 0.6, // bounciness off the side walls / ceiling
-    floorRestitution: 0.25, // bounciness off the floor ramp (low = rolls)
-    ballRestitution: 0.7, // bounciness between balls
-    friction: 0.08, // tangential speed lost per hard impact (scaled by impact speed)
-    bounceJitter: 1.3, // random sideways kick on cube bounces (natural scatter)
+    breakRestitution: 0.72, // bounciness when the hit breaks the cube
+    wallRestitution: 0.82, // bounciness off the side walls / ceiling
+    floorRestitution: 0.45, // bounciness off the floor ramp (a few hops, then it rolls)
+    ballRestitution: 0.85, // bounciness between balls
+    friction: 0.05, // tangential speed lost per hard impact (scaled by impact speed)
+    bounceJitter: 0.7, // random sideways kick on cube bounces (natural scatter)
     minImpactSpeed: 1.0, // slower touches deal no damage (resting contact)
     hitCooldown: 0.05, // s between two damaging hits of the same ball
     stuckRadius: 0.5, // a ball that stays within this distance off the floor…
     slowSpeed: 1.3, // …or dawdles slower than this on average (smoothed)…
     stuckTime: 0.8, // …for this long gets kicked towards a lane
     nudgeSpeed: 2.2, // sideways speed of that kick (it also hops the ball upwards)
+    pocketW: 0.6, // a ball bouncing within ±pocketW × ±pocketH of one spot…
+    pocketH: 0.8,
+    pocketTime: 2.5, // …for this long slips out of its pocket towards a lane
     maxAirTime: 12, // failsafe: a ball in play longer than this falls through the cubes
-    squashTime: 0.28, // s of the squash wobble after a bounce
-    maxSquash: 0.3, // max squash amount on a hard bounce
+    squashTime: 0.3, // s of the squash wobble after a bounce
+    maxSquash: 0.4, // max squash amount on a hard bounce
   },
   inletSquish: 0.72, // scale a ball shrinks to as it enters the inlet
 
@@ -106,7 +110,7 @@ export const CONFIG = {
   labelScale: 1.55, // number sprite size relative to the ball radius
 
   // ─── Pictures / cubes ───────────────────────────────────────────────────
-  cubeBaseHP: 4, // HP of every cube in the first picture (a "2" ball needs 2 bounces)
+  cubeBaseHP: 2, // HP of every cube in the first picture (a "2" ball breaks one per hit)
   cubeHPGrowth: 1.7, // HP multiplier per picture index (HP = base · growth^index)
   // Splash rules by ball value, applied on EVERY damaging bounce. The last row
   // whose minValue ≤ ball value wins. Directions follow the hit: a hit on a top
@@ -185,6 +189,7 @@ export const CONFIG = {
     break: 0.2, // cube "crack"
     coin: 0.08, // coin ding
     inlet: 0.08, // ball entering the inlet
+    bounce: 0.06, // wall bounce "boing"
     add: 0.16, // add-ball bloop
     merge: 0.15, // merge whoosh + chime
     purchase: 0.09, // cha-ching

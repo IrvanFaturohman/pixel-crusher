@@ -165,6 +165,13 @@ export class Audio {
     this.noise(0.04, V.inlet * 0.5, 'lowpass', 700);
   }
 
+  // Rubbery "boing" off walls; bigger balls sound lower.
+  bounce(level) {
+    if (!this.ready('bounce', 0.05)) return;
+    const f = Math.max(150, 520 * Math.pow(0.93, level - 1)) * rand(0.96, 1.04);
+    this.tone('sine', f * 0.8, f * 1.25, 0.08, V.bounce);
+  }
+
   addBall() {
     if (!this.ready('add', 0.04, true)) return;
     this.tone('sine', 280, 820, 0.16, V.add, 0, 0.01);

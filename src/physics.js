@@ -29,12 +29,15 @@ export function rampY(x) {
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
-// Reflect velocity off a surface with normal (nx, ny). Returns impact speed.
-function bounce(b, nx, ny, e, jitter) {
+// Reflect velocity off a surface with normal (nx, ny). A real impact springs
+// back at least `minOut` fast (arcade bounce). Returns the impact speed.
+function bounce(b, nx, ny, e, jitter, minOut = 0) {
   const vn = b.vx * nx + b.vy * ny;
   if (vn >= 0) return 0;
-  b.vx -= (1 + e) * vn * nx;
-  b.vy -= (1 + e) * vn * ny;
+  let out = -vn * e;
+  if (minOut > 0 && -vn > PH.minImpactSpeed && out < minOut) out = minOut;
+  b.vx += (out - vn) * nx;
+  b.vy += (out - vn) * ny;
   const tx = -ny;
   const ty = nx;
   const vt = b.vx * tx + b.vy * ty;
@@ -132,26 +135,26 @@ export function stepBall(b, grid, dt, onCube, onBounce) {
         b.hitCd = PH.hitCooldown;
         broke = onCube(b, bc, brow, bnx, bny, vn);
       }
-      const speed = bounce(b, bnx, bny, broke ? PH.breakRestitution : PH.cubeRestitution, PH.bounceJitter);
-      if (speed > 0) onBounce(b, bnx, bny, speed, false);
+      const speed = bounce(b, bnx, bny, broke ? PH.breakRestitution : PH.cubeRestitution, PH.bounceJitter, PH.minBounce);
+      if (speed > 0) onBounce(b, bnx, bny, speed, 0);
     }
   }
 
   // Side walls (the left wall is the pipe; below it the inlet swallows balls).
   if (p.x + r > WALL_RIGHT) {
     p.x = WALL_RIGHT - r;
-    bounce(b, -1, 0, PH.wallRestitution, 0);
+    onBounce(b, -1, 0, bounce(b, -1, 0, PH.wallRestitution, 0), 2);
   }
   if (p.y > INLET_TOP + 0.3 && p.x - r < WALL_LEFT) {
     p.x = WALL_LEFT + r;
-    bounce(b, 1, 0, PH.wallRestitution, 0);
+    onBounce(b, 1, 0, bounce(b, 1, 0, PH.wallRestitution, 0), 2);
   }
   // Ceiling (only once the ball has left the launcher).
   const ceil = ceilingY(p.x);
   if (p.y < ceil - r - 0.05) b.belowCeiling = true;
   if (b.belowCeiling && p.y + r > ceil) {
     p.y = ceil - r;
-    bounce(b, 0, -1, PH.wallRestitution, 0);
+    onBounce(b, 0, -1, bounce(b, 0, -1, PH.wallRestitution, 0), 2);
   }
 
   // Inlet mouth: anything that reaches the bottom-left corner gets swallowed.
@@ -166,7 +169,7 @@ export function stepBall(b, grid, dt, onCube, onBounce) {
       p.x += RAMP_NX * (r - dist);
       p.y += RAMP_NY * (r - dist);
       const speed = bounce(b, RAMP_NX, RAMP_NY, PH.floorRestitution, 0);
-      if (speed > 1.5) onBounce(b, RAMP_NX, RAMP_NY, speed, true);
+      if (speed > 1.5) onBounce(b, RAMP_NX, RAMP_NY, speed, 1);
       b.onFloor = true;
     }
   }
